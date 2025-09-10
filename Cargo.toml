@@ -1,0 +1,116 @@
+[package]
+name = "cuckoo-hashtable"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["std"]  # 移除了默认的 "simd" 依赖
+serde = ["dep:serde"]
+
+# 主要功能特性
+std = []  # 标准库支持
+simd = []  # 定义了 simd 特性（但可能需要额外的依赖）
+threading = ["std"]    # 线程支持
+logging = ["log"]  # 日志支持 - 修复这里
+metrics = ["dep:prometheus"]  # Prometheus 监控支持
+persistence = []  # 未来持久化支持
+testing = []  # 测试增强特性
+
+# 高级性能特性
+avx2 = ["simd"]    # AVX2 支持（依赖于 simd）
+avx512 = ["simd"]  # AVX512 支持（依赖于 simd）
+neon = ["simd"]    # ARM NEON 支持（依赖于 simd）
+jemalloc = ["dep:jemallocator"]  # jemalloc 支持
+tcmalloc = ["dep:tcmalloc"]      # tcmalloc 支持
+mimalloc = ["dep:mimalloc"]      # mimalloc 支持
+
+[dependencies]
+rayon = "1.8"
+thiserror = "1.0"
+crossbeam-epoch = "0.9"
+crossbeam-queue = "0.3.11" 
+crossbeam-utils = "0.8"
+ahash = "0.8.8"
+twox-hash = "1.6"
+lazy_static = "1.4"
+num_cpus = "1.13"
+
+arc-swap = "1.5"
+libc = "0.2"
+cfg-if = "1.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
+hex = "0.4"
+thread_local = "1.1"
+fastrand = "2.0.0"
+
+# 核心库依赖
+once_cell = { version = "1.10", default-features = false }
+
+# 并发支持
+parking_lot = { version = "0.12", default-features = false }
+crossbeam = { version = "0.8", default-features = false, features = ["alloc"] }
+
+# 可选依赖 - 按特性启用
+log = { version = "0.4", optional = true }  # 设为可选依赖
+prometheus = { version = "0.13", optional = true, default-features = false }
+jemallocator = { version = "0.5", optional = true }
+tcmalloc = { version = "0.3", optional = true }
+mimalloc = { version = "0.1", optional = true }
+rand =  "0.8"
+
+# SIMD 依赖 - 按需添加
+# core_arch = { version = "0.1.5", optional = true }  # 如果需要 SIMD，解除注释
+# stdsimd = { version = "0.1", optional = true }     # 如果需要 SIMD，解除注释
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Linux 特定优化
+#[target.'cfg(target_os = "linux")'.dependencies]
+#libnuma = "0.4"
+
+# 平台特定依赖
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["minwindef", "processthreadsapi", "winbase"] }
+
+[dev-dependencies]
+criterion = "0.5"
+tokio = { version = "^1.46.0", features = ["full"] }  # 异步测试
+# 测试依赖
+tempfile = "3.3"
+
+rand = "0.8"
+test-log = "0.2"
+env_logger = "0.10"
+log = "0.4"  
+# 基准测试专用
+iai = "0.1"
+
+rayon = "1.5"
+
+# 发布配置
+[profile.release]
+codegen-units = 1
+debug = true  # 调试符号用于生产分析
+lto = "thin"
+opt-level = 3
+incremental = false
+panic = "abort"
+
+# 调试配置
+[profile.dev]
+opt-level = 1
+debug = true
+
+# 基准测试配置
+[profile.bench]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+incremental = false
+debug = true
+panic = "abort"
+
+[[bench]]
+name = "benchmarks"
+harness = false
