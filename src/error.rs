@@ -100,7 +100,11 @@ pub enum CuckooError {
     #[error("找不到桶")]
     BucketNotFound,
     #[error("写入失败")]
-    InsertFailed
+    InsertFailed,
+    #[error("迁移状态冲突")]
+    MigrationStateConflict,
+    #[error("锁超时")]
+    LockTimeout,
 }
 
 impl CuckooError {
@@ -135,7 +139,9 @@ impl CuckooError {
             Self::SlotOccupied=>Some("槽位已被使用"),
             Self::MigrationTimeout=>Some("迁移超时"),
             Self::BucketNotFound=>Some("找不到桶"),
-            Self::InsertFailed=>Some("写入失败")
+            Self::InsertFailed=>Some("写入失败"),
+             Self::MigrationStateConflict=>Some("迁移状态冲突"),
+             Self::LockTimeout=>Some("锁超时"),
             
         }
     }

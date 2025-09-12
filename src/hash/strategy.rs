@@ -7,8 +7,8 @@ use crate::{
 use ahash::RandomState;
 use std::{
     any::Any,
-    hash::{Hash, Hasher, BuildHasher},
-    sync::Arc,
+    hash::{BuildHasher, Hash, Hasher},
+    sync::{atomic::AtomicUsize, Arc},
 };
 
 /// 哈希策略类型
@@ -16,7 +16,7 @@ use std::{
 pub enum HashStrategyType {
     DoubleHash,
     LinearProbe,
-    Adaptive,
+    //Adaptive,
 }
 
 /// 哈希算法选择
@@ -38,7 +38,7 @@ pub trait HashStrategy: Send + Sync {
     
     /// 更新容量
     fn update_capacity(&mut self, new_capacity: usize);
-    
+     fn get_capacity(&self) -> usize;
     /// 获取策略类型
     fn strategy_type(&self) -> HashStrategyType;
     
@@ -53,16 +53,16 @@ pub trait HashStrategy: Send + Sync {
     /// 作为可变Any类型
     fn as_any_mut(&mut self) -> &mut dyn Any;
     
-    /// 克隆策略
-    fn clone_box(&self) -> Box<dyn HashStrategy>;
+    // 克隆策略
+   // fn clone_box(&self) -> Box<dyn HashStrategy>;
 }
 
 // 为 Box<dyn HashStrategy> 实现 Clone
-impl Clone for Box<dyn HashStrategy> {
-    fn clone(&self) -> Self {
-        self.clone_box()
-    }
-}
+// impl Clone for Box<dyn HashStrategy> {
+//     fn clone(&self) -> Self {
+//         self.clone_box()
+//     }
+// }
 
 
 /// 哈希函数特征
@@ -79,79 +79,7 @@ where
     }
 }
 
-/// 自适应哈希策略
-#[derive(Clone)]
-pub struct AdaptiveHashStrategy {
-    primary: Box<dyn HashStrategy>,
-    secondary: Box<dyn HashStrategy>,
-    current: Box<dyn HashStrategy>,
-    collision_rate: f32,
-    threshold: f32,
-}
 
-impl AdaptiveHashStrategy {
-    /// 创建新自适应策略
-    pub fn new(
-        primary: Box<dyn HashStrategy>,
-        secondary: Box<dyn HashStrategy>,
-    ) -> Self {
-        let current = primary.clone_box();
-        Self {
-            primary,
-            secondary,
-            current,
-            collision_rate: 0.0,
-            threshold: 0.3, // 30%碰撞率阈值
-        }
-    }
-    
-    /// 更新碰撞率
-    pub fn update_collision_rate(&mut self, rate: f32) {
-        self.collision_rate = rate;
-        
-        if rate > self.threshold {
-            self.current = self.secondary.clone_box();
-        } else {
-            self.current = self.primary.clone_box();
-        }
-    }
-}
-
-impl HashStrategy for AdaptiveHashStrategy {
-    fn locate_buckets(&self, key: &dyn Key) -> (usize, usize) {
-        self.current.locate_buckets(key)
-    }
-    
-    fn fingerprint(&self, key: &dyn Key) -> Fingerprint {
-        self.current.fingerprint(key)
-    }
-    
-    fn update_capacity(&mut self, new_capacity: usize) {
-        self.primary.update_capacity(new_capacity);
-        self.secondary.update_capacity(new_capacity);
-        self.current.update_capacity(new_capacity);
-    }
-    
-    fn strategy_type(&self) -> HashStrategyType {
-        HashStrategyType::Adaptive
-    }
-    
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-    
-    fn clone_box(&self) -> Box<dyn HashStrategy> {
-        Box::new(self.clone())
-    }
-    
-    fn locate_buckets_with_capacity(&self, key: &dyn Key, capacity: usize) -> (usize, usize) {
-        self.current.locate_buckets_with_capacity(key, capacity)
-    }
-}
 
 /// 哈希策略工厂
 pub struct HashStrategyFactory {
@@ -178,7 +106,7 @@ impl HashStrategyFactory {
     pub fn create_strategy(&self, capacity: usize) -> Box<dyn HashStrategy> {
         match self.strategy_type {
             HashStrategyType::DoubleHash => Box::new(DoubleHashStrategy::new_with_generator(
-                capacity,
+                AtomicUsize::new(capacity),
                 self.fingerprint_generator.clone(),
                 self.hash_algorithm,
             )),
@@ -187,23 +115,7 @@ impl HashStrategyFactory {
                 self.fingerprint_generator.clone(),
                 self.hash_algorithm,
             )),
-            HashStrategyType::Adaptive => {
-                // 自适应策略结合双哈希和线性探测
-                let primary = DoubleHashStrategy::new_with_generator(
-                    capacity,
-                    self.fingerprint_generator.clone(),
-                    self.hash_algorithm,
-                );
-                let secondary = LinearProbeStrategy::new_with_generator(
-                    capacity,
-                    self.fingerprint_generator.clone(),
-                    self.hash_algorithm,
-                );
-                Box::new(AdaptiveHashStrategy::new(
-                    Box::new(primary),
-                    Box::new(secondary),
-                ))
-            }
+           
         }
     }
 }
@@ -213,7 +125,7 @@ impl HashStrategyFactory {
 mod tests {
     use super::*;
     use crate::types::Key;
-    use std::{any::Any, fmt};
+    use std::{any::Any, fmt, sync::atomic::AtomicUsize};
     
     // 测试用Key实现
     #[derive(Debug, PartialEq, Clone)]
@@ -256,10 +168,12 @@ mod tests {
             write!(f, "TestKey({:?})", self.0)
         }
     }
-
+    fn compacity()->AtomicUsize{
+        AtomicUsize::new(100)
+    }
     /// 测试双哈希策略
     fn test_double_hash_strategy(algorithm: HashAlgorithm) {
-        let strategy = DoubleHashStrategy::new(100, algorithm);
+        let strategy = DoubleHashStrategy::new(compacity(), algorithm);
         let key = TestKey(b"test_key".to_vec());
         
         // 成功锁定（空槽位）
@@ -319,41 +233,7 @@ mod tests {
         test_linear_probe_strategy(HashAlgorithm::Default);
     }
 
-    #[test]
-    fn test_adaptive_strategy() {
-        let fingerprint = Arc::new(DefaultFingerprintGenerator);
-        let factory = HashStrategyFactory::new(
-            HashStrategyType::Adaptive,
-            fingerprint,
-            HashAlgorithm::AHash,
-        );
-        
-        let mut strategy = factory.create_strategy(100);
-        
-        let key = TestKey(b"test_key".to_vec());
-        
-        // 初始使用主策略（双哈希）
-        let (b1, b2) = strategy.locate_buckets(&key);
-        assert_ne!(b1, b2, "双哈希策略应返回不同的桶位置");
-        
-        // 更新碰撞率高于阈值，切换到备选策略（线性探测）
-        if let Some(adaptive) = strategy.as_any_mut().downcast_mut::<AdaptiveHashStrategy>() {
-            adaptive.update_collision_rate(0.4);
-        }
-        
-        // 切换后应使用线性探测策略
-        let (b3, b4) = strategy.locate_buckets(&key);
-        assert_eq!(b4, (b3 + 1) % 100, "线性探测策略应返回相邻桶位置");
-        
-        // 更新碰撞率低于阈值，切换回主策略
-        if let Some(adaptive) = strategy.as_any_mut().downcast_mut::<AdaptiveHashStrategy>() {
-            adaptive.update_collision_rate(0.2);
-        }
-        
-        // 应回到双哈希策略
-        let (b5, b6) = strategy.locate_buckets(&key);
-        assert_ne!(b6, (b5 + 1) % 100, "双哈希策略应返回不同的桶位置");
-    }
+   
 
     #[test]
     fn test_strategy_factory() {
@@ -377,13 +257,6 @@ mod tests {
         let strategy = factory.create_strategy(100);
         assert_eq!(strategy.strategy_type(), HashStrategyType::LinearProbe);
         
-        // 测试自适应策略工厂
-        let factory = HashStrategyFactory::new(
-            HashStrategyType::Adaptive,
-            fingerprint,
-            HashAlgorithm::Default,
-        );
-        let strategy = factory.create_strategy(100);
-        assert_eq!(strategy.strategy_type(), HashStrategyType::Adaptive);
+       
     }
 }

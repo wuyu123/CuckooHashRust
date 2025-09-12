@@ -7,31 +7,31 @@ use crate::{
 use ahash::RandomState;
 use std::{
     any::Any,
-    hash::{Hash, Hasher,BuildHasher},
-    sync::Arc,
+    hash::{BuildHasher, Hash, Hasher},
+    sync::{atomic::{AtomicUsize, Ordering}, Arc},
 };
 
 
 
 /// 双哈希策略
-#[derive(Clone)]
+
 pub struct DoubleHashStrategy {
     primary_hasher: Arc<dyn HasherFunction>,
     secondary_hasher: Arc<dyn HasherFunction>,
     fingerprint_generator: Arc<dyn FingerprintGenerator>,
-    capacity: usize,
+    capacity: AtomicUsize,
   
 }
 
 impl DoubleHashStrategy {
     /// 创建新双哈希策略
-    pub fn new(capacity: usize, algorithm: HashAlgorithm) -> Self {
+    pub fn new(capacity: AtomicUsize, algorithm: HashAlgorithm) -> Self {
         Self::new_with_generator(capacity, Arc::new(DefaultFingerprintGenerator), algorithm)
     }
     
     /// 使用指定指纹生成器创建
     pub fn new_with_generator(
-        capacity: usize,
+        capacity: AtomicUsize,
         fingerprint_generator: Arc<dyn FingerprintGenerator>,
         algorithm: HashAlgorithm,
     ) -> Self {
@@ -79,7 +79,7 @@ impl DoubleHashStrategy {
     
     /// 创建SIMD加速策略
     #[cfg(target_arch = "x86_64")]
-    pub fn with_simd(capacity: usize, algorithm: HashAlgorithm) -> Self {
+    pub fn with_simd(capacity: AtomicUsize, algorithm: HashAlgorithm) -> Self {
         use crate::hash::fingerprint::SimdFingerprintGenerator;
         Self::new_with_generator(capacity, Arc::new(SimdFingerprintGenerator), algorithm)
     }
@@ -88,12 +88,12 @@ impl DoubleHashStrategy {
 impl HashStrategy for DoubleHashStrategy {
     fn locate_buckets(&self, key: &dyn Key) -> (usize, usize) {
         let key_bytes = key.as_bytes();
-        let h1 = self.primary_hasher.hash_bytes(key_bytes) as usize % self.capacity;
-        let h2 = self.secondary_hasher.hash_bytes(key_bytes) as usize % self.capacity;
+        let h1 = self.primary_hasher.hash_bytes(key_bytes) as usize % self.get_capacity();
+        let h2 = self.secondary_hasher.hash_bytes(key_bytes) as usize % self.get_capacity();
         
         // 确保两个桶位置不同
         if h1 == h2 {
-            (h1, (h2 + 1) % self.capacity)
+            (h1, (h2 + 1) % self.get_capacity())
         } else {
             (h1, h2)
         }
@@ -117,7 +117,11 @@ impl HashStrategy for DoubleHashStrategy {
     }
     
     fn update_capacity(&mut self, new_capacity: usize) {
-        self.capacity = new_capacity;
+        self.capacity.store(new_capacity, Ordering::Release);
+    }
+
+    fn get_capacity(&self) -> usize {
+        self.capacity.load(Ordering::Acquire)
     }
     
     fn strategy_type(&self) -> HashStrategyType {
@@ -131,10 +135,7 @@ impl HashStrategy for DoubleHashStrategy {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-
-    fn clone_box(&self) -> Box<dyn HashStrategy> {
-        Box::new(self.clone())
-    }
+    
 }
 
 // 单元测试
@@ -186,6 +187,9 @@ mod tests {
         }
     }
     
+    fn compacity()->AtomicUsize{
+        AtomicUsize::new(100)
+    }
     #[test]
     fn test_double_hash_ahash() {
         test_double_hash_algorithm(HashAlgorithm::AHash);
@@ -202,7 +206,7 @@ mod tests {
     }
     
     fn test_double_hash_algorithm(algorithm: HashAlgorithm) {
-        let strategy = DoubleHashStrategy::new(100, algorithm);
+        let strategy = DoubleHashStrategy::new(compacity(), algorithm);
         let key = TestKey(b"test_key".to_vec());
         
         let (b1, b2) = strategy.locate_buckets(&key);
@@ -216,7 +220,7 @@ mod tests {
     
     #[test]
     fn test_capacity_update() {
-        let mut strategy = DoubleHashStrategy::new(100, HashAlgorithm::AHash);
+        let mut strategy = DoubleHashStrategy::new(compacity(), HashAlgorithm::AHash);
         strategy.update_capacity(200);
         
         let key = TestKey(b"test".to_vec());
@@ -227,7 +231,7 @@ mod tests {
     
     #[test]
     fn test_same_key_same_buckets() {
-        let strategy = DoubleHashStrategy::new(100, HashAlgorithm::AHash);
+        let strategy = DoubleHashStrategy::new(compacity(), HashAlgorithm::AHash);
         let key1 = TestKey(b"consistent_key".to_vec());
         let key2 = TestKey(b"consistent_key".to_vec());
         
@@ -240,7 +244,7 @@ mod tests {
     
     #[test]
     fn test_different_keys_different_buckets() {
-        let strategy = DoubleHashStrategy::new(100, HashAlgorithm::AHash);
+        let strategy = DoubleHashStrategy::new(compacity(), HashAlgorithm::AHash);
         let key1 = TestKey(b"key_one".to_vec());
         let key2 = TestKey(b"key_two".to_vec());
         
@@ -256,7 +260,7 @@ mod tests {
     
     #[test]
     fn test_fingerprint_consistency() {
-        let strategy = DoubleHashStrategy::new(100, HashAlgorithm::AHash);
+        let strategy = DoubleHashStrategy::new(compacity(), HashAlgorithm::AHash);
         let key = TestKey(b"fingerprint_test".to_vec());
         
         let fp1 = strategy.fingerprint(&key);
@@ -267,7 +271,7 @@ mod tests {
     
     #[test]
     fn test_fingerprint_range() {
-        let strategy = DoubleHashStrategy::new(100, HashAlgorithm::AHash);
+        let strategy = DoubleHashStrategy::new(compacity(), HashAlgorithm::AHash);
         let key = TestKey(b"test_key".to_vec());
         
         let fp = strategy.fingerprint(&key);
@@ -278,7 +282,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_fingerprint() {
-        let strategy = DoubleHashStrategy::with_simd(100, HashAlgorithm::AHash);
+        let strategy = DoubleHashStrategy::with_simd(compacity(), HashAlgorithm::AHash);
         let key = TestKey(b"test_key".to_vec());
         
         let fp = strategy.fingerprint(&key);

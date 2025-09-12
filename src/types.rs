@@ -2,9 +2,20 @@
 
 use core::fmt;
 use std::{
-    any::Any, borrow::Cow, fmt::{Debug, Display}, hash::{Hash, Hasher}, sync::atomic::{AtomicU32, AtomicU64, Ordering}, time::{Duration, SystemTime}
+    any::Any, borrow::Cow, fmt::{Debug, Display}, hash::{Hash, Hasher}, sync::{atomic::{AtomicU32, AtomicU64, Ordering}, Arc, Mutex}, time::{Duration, SystemTime}
 };
-
+use lazy_static::lazy_static;
+use rayon::{ThreadPool, ThreadPoolBuilder};
+lazy_static! {
+   pub static ref GLOBAL_THREAD_POOL: ThreadPool = {
+        let num_threads = num_cpus::get().clamp(2, 8); // 限制在2-8个线程
+        ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("global-worker-{}", i))
+            .build()
+            .expect("Failed to create global thread pool")
+    };
+}
 /// 键特征 - 支持动态类型
 pub trait Key: Debug + Display + Send + Sync + 'static {
     /// 获取键的字节表示
@@ -438,7 +449,26 @@ pub struct MigrationConfig {
     pub parallelism: usize,
     pub enable_parallel: bool,
 }
+// 定义队列类型
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum QueueType {
+    InsertQueue,   // 迁移过程中的新数据写入失败重放队列
+    MigrateQueue, // 迁移失败重放队列
+}
 
+impl QueueType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            QueueType::InsertQueue => "insert_queue",
+            QueueType::MigrateQueue => "migrate_queue",
+        }
+    }
+
+     // 获取所有变体的列表
+    pub fn all() -> &'static [Self] {
+        &[QueueType::InsertQueue, QueueType::MigrateQueue]
+    }
+}
 /// 原子操作统计
 #[derive(Debug)]
 pub struct AtomicOpStats {

@@ -5,6 +5,8 @@ pub mod double_hash;
 pub mod linear_probe;
 pub mod fingerprint;
 
+use std::sync::atomic::AtomicUsize;
+
 pub use strategy::{HashStrategy, HashStrategyType};
 pub use double_hash::DoubleHashStrategy;
 pub use linear_probe::LinearProbeStrategy;
@@ -18,13 +20,13 @@ use crate::hash::strategy::HashAlgorithm;
 
 /// 默认哈希策略
 pub fn default_hash_strategy(capacity: usize) -> Box<dyn HashStrategy> {
-    Box::new(DoubleHashStrategy::new(capacity,HashAlgorithm::AHash))
+    Box::new(DoubleHashStrategy::new(AtomicUsize::new(capacity),HashAlgorithm::AHash))
 }
 
 /// SIMD加速哈希策略
 #[cfg(target_arch = "x86_64")]
 pub fn simd_hash_strategy(capacity: usize) -> Box<dyn HashStrategy> {
-    Box::new(DoubleHashStrategy::with_simd(capacity,HashAlgorithm::AHash))
+    Box::new(DoubleHashStrategy::with_simd(AtomicUsize::new(capacity),HashAlgorithm::AHash))
 }
 
 /// 哈希工具函数

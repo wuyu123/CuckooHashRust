@@ -102,7 +102,7 @@ pub mod simd;
 pub mod stats;
 pub mod version;
 
-use std::sync::Arc;
+use std::sync::{atomic::AtomicUsize, Arc};
 
 use crate::hash::strategy::HashAlgorithm;
 // 公共接口导出
@@ -184,7 +184,7 @@ where
             migration_lock_timeout_ms: 100,
         };
         
-        let hasher = Box::new(DoubleHashStrategy::new(config.initial_capacity,HashAlgorithm::AHash));
+        let hasher = Box::new(DoubleHashStrategy::new(AtomicUsize::new(config.initial_capacity),HashAlgorithm::AHash));
         let memory_pool = Arc::new(memory::PoolAllocator::new(1024 * 1024,512)); // 1MB初始池
         let simd_searcher = simd::global_searcher();
         let stats_recorder = Arc::new(stats::GlobalStatsRecorder::default());

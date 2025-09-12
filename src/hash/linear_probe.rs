@@ -123,9 +123,7 @@ impl HashStrategy for LinearProbeStrategy {
         self
     }
     
-    fn clone_box(&self) -> Box<dyn HashStrategy> {
-        Box::new(self.clone())
-    }
+    
     
     fn locate_buckets_with_capacity(&self, key: &dyn Key, capacity: usize) -> (usize, usize) {
         let key_bytes = key.as_bytes();
@@ -135,6 +133,10 @@ impl HashStrategy for LinearProbeStrategy {
         
         // 线性探测策略只返回一个位置
         (h1, (h1 + 1) % capacity)
+    }
+    
+    fn get_capacity(&self) -> usize {
+        todo!()
     }
 }
 
